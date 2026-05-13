@@ -70,6 +70,8 @@ static void AudioMixingThread()
             mixBuffer[i] = 0.0f;
 
         std::vector<std::pair<AltsoundStreamInfo*, _internal_stream_data*>> activeStreams;
+        struct DeferredSync { SYNCPROC cb; void* user; unsigned int hsync; unsigned int hstream; };
+        std::vector<DeferredSync> deferredSyncs;
         {
             std::lock_guard<std::mutex> lock(io_mutex);
             std::lock_guard<std::mutex> streamLock(g_streamMapMutex);
@@ -82,66 +84,71 @@ static void AudioMixingThread()
                     }
                 }
             }
+
+            for (auto& streamPair : activeStreams) {
+                AltsoundStreamInfo* stream = streamPair.first;
+                _internal_stream_data* internal = streamPair.second;
+
+                const float volume = internal->volume;
+                const uint32_t outCh = g_channels;
+                const uint32_t inCh = internal->channels;
+
+                size_t dstBaseFrame = 0;
+                while (dstBaseFrame < g_bufferSizeFrames) {
+                    const ma_uint64 framesRequested = g_bufferSizeFrames - dstBaseFrame;
+                    ma_uint64 framesRead = 0;
+                    ma_result result = altsound_ma_decoder_read_pcm_frames(internal->decoder, tempBuffer, framesRequested, &framesRead);
+
+                    if (framesRead == 0) {
+                        if (stream->loop) {
+                            altsound_ma_decoder_seek_to_pcm_frame(internal->decoder, 0);
+                            continue;
+                        } else {
+                            internal->playing = false;
+                            if (internal->sync_callback) {
+                                deferredSyncs.push_back({internal->sync_callback, internal->sync_userdata, stream->hsync, stream->hstream});
+                                internal->sync_callback = nullptr;
+                            }
+                            break;
+                        }
+                    }
+
+                    const size_t framesToMix = static_cast<size_t>(framesRead);
+                    if (inCh == outCh) {
+                        for (size_t frame = 0; frame < framesToMix; ++frame) {
+                            for (uint32_t ch = 0; ch < outCh; ++ch) {
+                                size_t idx = (dstBaseFrame + frame) * outCh + ch;
+                                mixBuffer[idx] += tempBuffer[frame * inCh + ch] * volume;
+                            }
+                        }
+                    } else {
+                        for (size_t frame = 0; frame < framesToMix; ++frame) {
+                            for (uint32_t ch = 0; ch < outCh; ++ch) {
+                                size_t srcIdx = frame * inCh + (ch % inCh);
+                                size_t dstIdx = (dstBaseFrame + frame) * outCh + ch;
+                                mixBuffer[dstIdx] += tempBuffer[srcIdx] * volume;
+                            }
+                        }
+                    }
+
+                    if (framesRead < framesRequested) {
+                        if (stream->loop) {
+                            altsound_ma_decoder_seek_to_pcm_frame(internal->decoder, 0);
+                            dstBaseFrame += framesToMix;
+                            continue;
+                        } else {
+                            dstBaseFrame += framesToMix;
+                            break;
+                        }
+                    }
+
+                    dstBaseFrame += framesToMix;
+                }
+            }
         }
 
-        for (auto& streamPair : activeStreams) {
-            AltsoundStreamInfo* stream = streamPair.first;
-            _internal_stream_data* internal = streamPair.second;
-
-            const float volume = internal->volume;
-            const uint32_t outCh = g_channels;
-            const uint32_t inCh = internal->channels;
-
-            size_t dstBaseFrame = 0;
-            while (dstBaseFrame < g_bufferSizeFrames) {
-                const ma_uint64 framesRequested = g_bufferSizeFrames - dstBaseFrame;
-                ma_uint64 framesRead = 0;
-                ma_result result = altsound_ma_decoder_read_pcm_frames(internal->decoder, tempBuffer, framesRequested, &framesRead);
-
-                if (framesRead == 0) {
-                    if (stream->loop) {
-                        altsound_ma_decoder_seek_to_pcm_frame(internal->decoder, 0);
-                        continue;
-                    } else {
-                        internal->playing = false;
-                        if (internal->sync_callback) {
-                            internal->sync_callback(stream->hsync, stream->hstream, 0, internal->sync_userdata);
-                        }
-                        break;
-                    }
-                }
-
-                const size_t framesToMix = static_cast<size_t>(framesRead);
-                if (inCh == outCh) {
-                    for (size_t frame = 0; frame < framesToMix; ++frame) {
-                        for (uint32_t ch = 0; ch < outCh; ++ch) {
-                            size_t idx = (dstBaseFrame + frame) * outCh + ch;
-                            mixBuffer[idx] += tempBuffer[frame * inCh + ch] * volume;
-                        }
-                    }
-                } else {
-                    for (size_t frame = 0; frame < framesToMix; ++frame) {
-                        for (uint32_t ch = 0; ch < outCh; ++ch) {
-                            size_t srcIdx = frame * inCh + (ch % inCh);
-                            size_t dstIdx = (dstBaseFrame + frame) * outCh + ch;
-                            mixBuffer[dstIdx] += tempBuffer[srcIdx] * volume;
-                        }
-                    }
-                }
-
-                if (framesRead < framesRequested) {
-                    if (stream->loop) {
-                        altsound_ma_decoder_seek_to_pcm_frame(internal->decoder, 0);
-                        dstBaseFrame += framesToMix;
-                        continue;
-                    } else {
-                        dstBaseFrame += framesToMix;
-                        break;
-                    }
-                }
-
-                dstBaseFrame += framesToMix;
-            }
+        for (auto& d : deferredSyncs) {
+            d.cb(d.hsync, d.hstream, 0, d.user);
         }
 
         {
