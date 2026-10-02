@@ -77,6 +77,8 @@ struct _stream_info {
 	bool stop_music = false;
 	bool loop = false;
 	float gain = 1.0f;
+	// last volume the processor set on this stream (gain after ducking), before host gains
+	float processor_vol = 1.0f;
 };
 
 // Structure for storing G-Sound ducking profiles

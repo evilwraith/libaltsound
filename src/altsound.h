@@ -71,5 +71,24 @@ ALTSOUNDAPI void AltSoundPause(bool pause);
 // Can be set before AltSoundInit and persists across AltSoundShutdown.
 ALTSOUNDAPI void AltSoundSetMasterGain(float gain);
 ALTSOUNDAPI float AltSoundGetMasterGain();
+
+// Sample groups a package sorts its samples into. Which ones exist depends on the format:
+// AltSound and Legacy packages have MUSIC, JINGLE and SFX; G-Sound packages have MUSIC,
+// CALLOUT, SFX, SOLO and OVERLAY. AltSoundGetSampleGroups returns the loaded package's set as
+// a bitmask of (1 << group), 0 when nothing is loaded.
+typedef enum {
+	ALTSOUND_SAMPLE_GROUP_MUSIC = 1,
+	ALTSOUND_SAMPLE_GROUP_JINGLE = 2,
+	ALTSOUND_SAMPLE_GROUP_SFX = 3,
+	ALTSOUND_SAMPLE_GROUP_CALLOUT = 4,
+	ALTSOUND_SAMPLE_GROUP_SOLO = 5,
+	ALTSOUND_SAMPLE_GROUP_OVERLAY = 6,
+} ALTSOUND_SAMPLE_GROUP;
+
+ALTSOUNDAPI unsigned int AltSoundGetSampleGroups();
+// Linear gain on one group, multiplied with the master gain and the package's own gains and
+// ducking (1.0 = as authored). Applies to streams already playing. Persists like the master gain.
+ALTSOUNDAPI void AltSoundSetGroupGain(ALTSOUND_SAMPLE_GROUP group, float gain);
+ALTSOUNDAPI float AltSoundGetGroupGain(ALTSOUND_SAMPLE_GROUP group);
 ALTSOUNDAPI void AltSoundShutdown();
 

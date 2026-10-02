@@ -23,6 +23,7 @@ extern StreamArray channel_stream;
 // initialize static data members
 float AltsoundProcessorBase::global_vol = 1.0f;
 float AltsoundProcessorBase::master_vol = 1.0f;
+std::array<float, OVERLAY + 1> AltsoundProcessorBase::group_gain = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 
 // reference to sound command recording status
 extern bool rec_snd_cmds;
@@ -185,10 +186,14 @@ bool AltsoundProcessorBase::setStreamVolume(unsigned int stream_in, const float 
 	if (stream_in == MINIAUDIO_NO_STREAM)
 		return true;
 
-	const float new_vol = vol_in * global_vol * master_vol;
+	AltsoundStreamInfo* const stream = findStream(stream_in);
+	if (stream)
+		stream->processor_vol = vol_in;
+	const float group_vol = stream ? getGroupGain(stream->stream_type) : 1.0f;
+	const float new_vol = vol_in * global_vol * master_vol * group_vol;
 	ALT_INFO(1, "Setting volume for stream %u", stream_in);
-	ALT_DEBUG(1, "SAMPLE_VOL:%.02f  GLOBAL_VOL:%.02f  MASTER_VOL:%.02f", vol_in,
-	          global_vol, master_vol);
+	ALT_DEBUG(1, "SAMPLE_VOL:%.02f  GLOBAL_VOL:%.02f  MASTER_VOL:%.02f  GROUP_VOL:%.02f", vol_in,
+	          global_vol, master_vol, group_vol);
 	const bool success = MiniAudio_ChannelSetVolume(stream_in, new_vol);
 
 	if (!success) {
@@ -213,8 +218,38 @@ float AltsoundProcessorBase::getStreamVolume(unsigned int stream_in)
 	float vol;
 	if (!MiniAudio_ChannelGetVolume(stream_in, vol))
 		return -FLT_MAX;
-	else
-		return vol/(global_vol * master_vol);
+	else {
+		const AltsoundStreamInfo* const stream = findStream(stream_in);
+		return vol/(global_vol * master_vol * (stream ? getGroupGain(stream->stream_type) : 1.0f));
+	}
+}
+
+// ----------------------------------------------------------------------------
+
+AltsoundStreamInfo* AltsoundProcessorBase::findStream(unsigned int stream_in)
+{
+	for (const auto stream : channel_stream) {
+		if (stream && stream->hstream == stream_in)
+			return stream;
+	}
+	return nullptr;
+}
+
+// ----------------------------------------------------------------------------
+
+void AltsoundProcessorBase::setGroupGain(AltsoundSampleType type, const float gain_in)
+{
+	if (type <= UNDEFINED || type > OVERLAY)
+		return;
+
+	group_gain[type] = gain_in;
+
+	// Re-set each playing stream of the group from the volume the processor last gave it (its
+	// gain after ducking), which setStreamVolume recorded; the new factor goes on top of that.
+	for (const auto stream : channel_stream) {
+		if (stream && stream->stream_type == type)
+			setStreamVolume(stream->hstream, stream->processor_vol);
+	}
 }
 
 // ----------------------------------------------------------------------------

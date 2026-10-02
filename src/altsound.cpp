@@ -49,6 +49,9 @@ static uint32_t g_bufferSizeFrames = 256;
 static float g_masterGain = 1.0f;
 static std::mutex g_engineGainMutex;
 
+// Sample groups of the loaded package, see AltSoundGetSampleGroups. Guarded by io_mutex.
+static unsigned int g_sampleGroups = 0;
+
 /******************************************************
  * Audio mixing
  *
@@ -423,9 +426,13 @@ ALTSOUNDAPI bool AltSoundInit(const string& pinmamePath, const string& gameName,
 		// G-Sound only supports new CSV format. No need to specify format
 		// in the constructor
 		g_pProcessor = new GSoundProcessor(gameName, szPinmamePath);
+		std::lock_guard<std::mutex> lock(io_mutex);
+		g_sampleGroups = (1u << MUSIC) | (1u << CALLOUT) | (1u << SFX) | (1u << SOLO) | (1u << OVERLAY);
 	}
 	else if (format == "altsound" || format == "legacy") {
 		g_pProcessor = new AltsoundProcessor(gameName, szPinmamePath, format);
+		std::lock_guard<std::mutex> lock(io_mutex);
+		g_sampleGroups = (1u << MUSIC) | (1u << JINGLE) | (1u << SFX);
 	}
 	else {
 		ALT_ERROR(0, "Unknown AltSound format: %s", format.c_str());
@@ -643,6 +650,32 @@ ALTSOUNDAPI float AltSoundGetMasterGain()
 }
 
 /******************************************************
+ * AltSoundGetSampleGroups / AltSoundSetGroupGain / AltSoundGetGroupGain
+ ******************************************************/
+
+ALTSOUNDAPI unsigned int AltSoundGetSampleGroups()
+{
+	std::lock_guard<std::mutex> lock(io_mutex);
+	return g_sampleGroups;
+}
+
+ALTSOUNDAPI void AltSoundSetGroupGain(ALTSOUND_SAMPLE_GROUP group, float gain)
+{
+	if (!(gain >= 0.0f)) // also rejects NaN
+		gain = 0.0f;
+
+	// io_mutex serialises this with command processing and the end-of-stream callbacks, the
+	// only other writers of channel_stream.
+	std::lock_guard<std::mutex> lock(io_mutex);
+	AltsoundProcessorBase::setGroupGain(static_cast<AltsoundSampleType>(group), gain);
+}
+
+ALTSOUNDAPI float AltSoundGetGroupGain(ALTSOUND_SAMPLE_GROUP group)
+{
+	return AltsoundProcessorBase::getGroupGain(static_cast<AltsoundSampleType>(group));
+}
+
+/******************************************************
  * AltSoundShutdown
  ******************************************************/
 
@@ -664,8 +697,12 @@ ALTSOUNDAPI void AltSoundShutdown()
 	}
 
 	if (g_pProcessor) {
+		// The destructors free channel_stream without locking; hold io_mutex so a group gain
+		// change from another thread cannot walk it meanwhile.
+		std::lock_guard<std::mutex> lock(io_mutex);
 		delete g_pProcessor;
 		g_pProcessor = NULL;
+		g_sampleGroups = 0;
 	}
 
 	if (g_engine) {

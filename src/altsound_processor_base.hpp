@@ -67,6 +67,12 @@ public:
 	void setMasterVol(const float vol_in);
 	static float getMasterVol();
 
+	// Host gain per sample type (MUSIC, JINGLE, SFX, CALLOUT, SOLO, OVERLAY), on top of the
+	// package's own gains and ducking. Re-applied to the streams already playing. Caller must
+	// hold io_mutex for setGroupGain, as it walks channel_stream.
+	static void setGroupGain(AltsoundSampleType type, const float gain_in);
+	static float getGroupGain(AltsoundSampleType type);
+
 	// global accessor/mutator
 	void setGlobalVol(const float vol_in);
 	static float getGlobalVol();
@@ -109,6 +115,9 @@ protected: // functions
 	// get volume on provided stream, -FLT_MAX on error
 	static float getStreamVolume(unsigned int hstream);
 
+	// stream registered on hstream in channel_stream, nullptr if none (yet)
+	static AltsoundStreamInfo* findStream(unsigned int hstream);
+
 	// Return ROM shortname
 	const string& getGameName();
 
@@ -131,6 +140,7 @@ private: // data
 	bool use_rom_ctrl = true;
 	static float global_vol;
 	static float master_vol;
+	static std::array<float, OVERLAY + 1> group_gain;
 	unsigned int skip_count;
 };
 
@@ -176,6 +186,12 @@ inline void AltsoundProcessorBase::setMasterVol(const float vol_in) {
 
 inline float AltsoundProcessorBase::getMasterVol() {
 	return master_vol;
+}
+
+// ----------------------------------------------------------------------------
+
+inline float AltsoundProcessorBase::getGroupGain(AltsoundSampleType type) {
+	return (type > UNDEFINED && type <= OVERLAY) ? group_gain[type] : 1.0f;
 }
 
 // ----------------------------------------------------------------------------
