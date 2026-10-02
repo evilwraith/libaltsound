@@ -44,6 +44,11 @@ ma_context* g_context = nullptr;
 
 static uint32_t g_bufferSizeFrames = 256;
 
+// Host-controlled gain on the engine's output. Guarded by g_engineGainMutex together with the
+// engine's lifetime, as the host may set it from a thread other than the one that inits/shuts down.
+static float g_masterGain = 1.0f;
+static std::mutex g_engineGainMutex;
+
 /******************************************************
  * Audio mixing
  *
@@ -452,6 +457,11 @@ ALTSOUNDAPI bool AltSoundInit(const string& pinmamePath, const string& gameName,
 	g_cmdData.cmd_filter = 0;
 	std::fill_n(g_cmdData.cmd_buffer, ALT_MAX_CMDS, ~0);
 
+	{
+		std::lock_guard<std::mutex> lock(g_engineGainMutex);
+		altsound_ma_engine_set_volume(g_engine, g_masterGain);
+	}
+
 	altsound_ma_engine_start(g_engine);
 
 	ALT_DEBUG(0, "END AltSoundInit()");
@@ -612,6 +622,27 @@ ALTSOUNDAPI void AltSoundPause(bool pause)
 }
 
 /******************************************************
+ * AltSoundSetMasterGain / AltSoundGetMasterGain
+ ******************************************************/
+
+ALTSOUNDAPI void AltSoundSetMasterGain(float gain)
+{
+	if (!(gain >= 0.0f)) // also rejects NaN
+		gain = 0.0f;
+
+	std::lock_guard<std::mutex> lock(g_engineGainMutex);
+	g_masterGain = gain;
+	if (g_engine)
+		altsound_ma_engine_set_volume(g_engine, gain);
+}
+
+ALTSOUNDAPI float AltSoundGetMasterGain()
+{
+	std::lock_guard<std::mutex> lock(g_engineGainMutex);
+	return g_masterGain;
+}
+
+/******************************************************
  * AltSoundShutdown
  ******************************************************/
 
@@ -638,6 +669,7 @@ ALTSOUNDAPI void AltSoundShutdown()
 	}
 
 	if (g_engine) {
+		std::lock_guard<std::mutex> lock(g_engineGainMutex);
 		altsound_ma_engine_uninit(g_engine);
 		delete g_engine;
 		g_engine = nullptr;

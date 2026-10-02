@@ -66,5 +66,10 @@ ALTSOUNDAPI void AltSoundSetHardwareGen(ALTSOUND_HARDWARE_GEN hardwareGen);
 ALTSOUNDAPI void AltSoundSetAudioCallback(AltSoundAudioCallback callback, void* userData);
 ALTSOUNDAPI bool AltSoundProcessCommand(const unsigned int cmd, int attenuation);
 ALTSOUNDAPI void AltSoundPause(bool pause);
+// Linear gain applied to the finished mix (1.0 = as authored, above 1.0 amplifies). It scales
+// every stream alike, so the package's per-sample gains and ducking keep their proportions.
+// Can be set before AltSoundInit and persists across AltSoundShutdown.
+ALTSOUNDAPI void AltSoundSetMasterGain(float gain);
+ALTSOUNDAPI float AltSoundGetMasterGain();
 ALTSOUNDAPI void AltSoundShutdown();
 

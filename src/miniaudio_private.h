@@ -20,6 +20,7 @@ void altsound_ma_engine_uninit(ma_engine* pEngine);
 void altsound_ma_context_uninit(ma_context* pContext);
 ma_result altsound_ma_engine_start(ma_engine* pEngine);
 ma_result altsound_ma_engine_stop(ma_engine* pEngine);
+ma_result altsound_ma_engine_set_volume(ma_engine* pEngine, float volume);
 
 ma_result altsound_ma_sound_init_from_decoder(ma_engine* pEngine, ma_decoder* pDecoder, ma_uint32 flags, ma_sound* pSound);
 void altsound_ma_sound_uninit(ma_sound* pSound);

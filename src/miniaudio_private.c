@@ -96,6 +96,11 @@ ma_result altsound_ma_engine_stop(ma_engine* pEngine)
     return ma_engine_stop(pEngine);
 }
 
+ma_result altsound_ma_engine_set_volume(ma_engine* pEngine, float volume)
+{
+    return ma_engine_set_volume(pEngine, volume);
+}
+
 ma_result altsound_ma_sound_init_from_decoder(ma_engine* pEngine, ma_decoder* pDecoder, ma_uint32 flags, ma_sound* pSound)
 {
     return ma_sound_init_from_data_source(pEngine, (ma_data_source*)pDecoder, flags, NULL, pSound);
