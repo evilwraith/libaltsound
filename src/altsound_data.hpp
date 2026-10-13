@@ -44,11 +44,22 @@
 // Global Data Structures
 // ----------------------------------------------------------------------------
 
+// Byte-stream framing state for the pre-DCS WPC sound board (see
+// altsound_preprocess_commands): 0x79 <vol> <~vol> and 0x7A <xx> sequences.
+enum WpcCmdState {
+  WPC_CMD_IDLE = 0,
+  WPC_CMD_EXT,    // 0x7A received, one command byte follows
+  WPC_CMD_VOL_1,  // 0x79 received, volume byte follows
+  WPC_CMD_VOL_2   // volume byte received, its complement follows
+};
+
 typedef struct _cmd_data {
   unsigned int cmd_counter;
   int stored_command;
   unsigned int cmd_filter;
   unsigned int cmd_buffer[ALT_MAX_CMDS];
+  WpcCmdState wpc_state;
+  unsigned int wpc_vol;
 } CmdData;
 
 struct _stream_info;  // forward declaration for clarity

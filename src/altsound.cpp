@@ -180,29 +180,69 @@ void altsound_preprocess_commands(int cmd)
 		case ALTSOUND_HARDWARE_GEN_WPCFLIPTRON: {
 			ALT_DEBUG(0, "Hardware Generation: WPCALPHA_2, WPCDMD, WPCFLIPTRON");
 
+			// The pre-DCS WPC sound ROM frames its byte stream as:
+			//   0x79 <vol> <~vol>   set master volume (the two bytes after 0x79 are
+			//                       data, never sound commands)
+			//   0x7A <xx>           16-bit sound command 0x7Axx
+			//   <xx>                8-bit sound command
+			// Previously the volume op was only recognised once <~vol> had arrived, by
+			// which time 0x79 and <vol> had each already been dispatched as 8-bit
+			// commands: TAF sends 0x79 0x1C 0xE3 at boot and 0x1C is its looping
+			// "thing" music, which then played until the next music command. Track
+			// the framing explicitly instead of sniffing the command history, so the
+			// volume payload is held back and a byte following a complete 0x7A7A is
+			// an 8-bit command again rather than a second 0x7A payload.
 			g_cmdData.cmd_filter = 0;
-			if ((g_cmdData.cmd_buffer[2] == 0x79) && (g_cmdData.cmd_buffer[1] == (g_cmdData.cmd_buffer[0] ^ 0xFF))) { // change volume op (following first byte = volume, second = ~volume, if these don't match: ignore)
-				if (g_pProcessor->romControlsVol()) {
-					g_pProcessor->setGlobalVol(std::min((float)g_cmdData.cmd_buffer[1] / 127.f, 1.0f));
-					ALT_INFO(0, "Change volume %.02f", g_pProcessor->getGlobalVol());
-				}
+			switch (g_cmdData.wpc_state) {
+				case WPC_CMD_IDLE:
+					if (cmd == 0x79) { // volume op, two data bytes follow
+						g_cmdData.wpc_state = WPC_CMD_VOL_1;
+						g_cmdData.cmd_counter = 0;
+						g_cmdData.cmd_filter = 1;
+					}
+					else if (cmd == 0x7A) { // 16bit command first part //!! TZ triggers a 0xFF in the beginning -> check sequence and filter?
+						g_cmdData.wpc_state = WPC_CMD_EXT;
+						g_cmdData.cmd_counter = 1;
+					}
+					else { // 8 bit command
+						g_cmdData.stored_command = 0;
+						g_cmdData.cmd_counter = 0;
+					}
+					break;
 
-				for (int i = 0; i < ALT_MAX_CMDS; ++i)
-					g_cmdData.cmd_buffer[i] = ~0;
+				case WPC_CMD_EXT: // 16bit command second part
+					g_cmdData.stored_command = 0x7A;
+					g_cmdData.cmd_counter = 0;
+					g_cmdData.wpc_state = WPC_CMD_IDLE;
+					break;
 
-				g_cmdData.cmd_counter = 0;
-				g_cmdData.cmd_filter = 1;
+				case WPC_CMD_VOL_1: // volume byte
+					g_cmdData.wpc_vol = cmd;
+					g_cmdData.wpc_state = WPC_CMD_VOL_2;
+					g_cmdData.cmd_counter = 0;
+					g_cmdData.cmd_filter = 1;
+					break;
+
+				case WPC_CMD_VOL_2: // complement of the volume byte
+					if (cmd == (g_cmdData.wpc_vol ^ 0xFF)) {
+						if (g_pProcessor->romControlsVol()) {
+							g_pProcessor->setGlobalVol(std::min((float)g_cmdData.wpc_vol / 127.f, 1.0f));
+							ALT_INFO(0, "Change volume %.02f (%u)", g_pProcessor->getGlobalVol(), g_cmdData.wpc_vol);
+						}
+						else
+							ALT_DEBUG(0, "Volume command filtered: 79 %02X %02X", g_cmdData.wpc_vol, cmd);
+					}
+					else
+						ALT_DEBUG(0, "Volume command complement mismatch, filtered: 79 %02X %02X", g_cmdData.wpc_vol, cmd);
+
+					for (int i = 0; i < ALT_MAX_CMDS; ++i)
+						g_cmdData.cmd_buffer[i] = ~0;
+
+					g_cmdData.wpc_state = WPC_CMD_IDLE;
+					g_cmdData.cmd_counter = 0;
+					g_cmdData.cmd_filter = 1;
+					break;
 			}
-			else if (g_cmdData.cmd_buffer[1] == 0x7A) { // 16bit command second part //!! TZ triggers a 0xFF in the beginning -> check sequence and filter?
-				g_cmdData.stored_command = g_cmdData.cmd_buffer[1];
-				g_cmdData.cmd_counter = 0;
-			}
-			else if (cmd != 0x7A) { // 8 bit command
-				g_cmdData.stored_command = 0;
-				g_cmdData.cmd_counter = 0;
-			}
-			else // 16bit command first part
-				g_cmdData.cmd_counter = 1;
 
 			break;
 		}
@@ -462,6 +502,8 @@ ALTSOUNDAPI bool AltSoundInit(const string& pinmamePath, const string& gameName,
 	g_cmdData.cmd_counter = 0;
 	g_cmdData.stored_command = -1;
 	g_cmdData.cmd_filter = 0;
+	g_cmdData.wpc_state = WPC_CMD_IDLE;
+	g_cmdData.wpc_vol = 0;
 	std::fill_n(g_cmdData.cmd_buffer, ALT_MAX_CMDS, ~0);
 
 	{
