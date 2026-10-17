@@ -41,6 +41,8 @@ typedef enum : uint64_t {
 	ALTSOUND_HARDWARE_GEN_DEDMD16 = 0x0000000002000,     // DE 128x16
 	ALTSOUND_HARDWARE_GEN_DEDMD32 = 0x0000000004000,     // DE 128x32
 	ALTSOUND_HARDWARE_GEN_DEDMD64 = 0x0000000008000,     // DE 192x64
+	ALTSOUND_HARDWARE_GEN_BY17 = 0x0000000200000,        // Bally MPU-17
+	ALTSOUND_HARDWARE_GEN_BY35 = 0x0000000400000,        // Bally MPU-35
 	ALTSOUND_HARDWARE_GEN_GTS80 = 0x0000200000000,       // GTS80 / Gottlieb System 80
 	//ALTSOUND_HARDWARE_GEN_GTS80A = ALTSOUND_HARDWARE_GEN_GTS80,
 	ALTSOUND_HARDWARE_GEN_WS = 0x0004000000000,          // Whitestar
@@ -65,6 +67,7 @@ ALTSOUNDAPI bool AltSoundInit(const string& pinmamePath, const string& gameName,
 ALTSOUNDAPI void AltSoundSetHardwareGen(ALTSOUND_HARDWARE_GEN hardwareGen);
 ALTSOUNDAPI void AltSoundSetAudioCallback(AltSoundAudioCallback callback, void* userData);
 ALTSOUNDAPI bool AltSoundProcessCommand(const unsigned int cmd, int attenuation);
+ALTSOUNDAPI bool AltSoundProcessBoardCommand(const unsigned int board, const unsigned int cmd, int attenuation);
 ALTSOUNDAPI void AltSoundPause(bool pause);
 // Linear gain applied to the finished mix (1.0 = as authored, above 1.0 amplifies). It scales
 // every stream alike, so the package's per-sample gains and ducking keep their proportions.
