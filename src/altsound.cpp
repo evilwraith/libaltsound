@@ -226,7 +226,9 @@ void altsound_preprocess_commands(int cmd)
 				case WPC_CMD_VOL_2: // complement of the volume byte
 					if (cmd == (g_cmdData.wpc_vol ^ 0xFF)) {
 						if (g_pProcessor->romControlsVol()) {
-							g_pProcessor->setGlobalVol(std::min((float)g_cmdData.wpc_vol / 127.f, 1.0f));
+							// The pre-DCS sound ROM volume runs 0..31 (TAF sends 28 at boot, BoP 30).
+							// Dividing by 127 capped every WPC89 game at a quarter of full volume.
+							g_pProcessor->setGlobalVol(std::min((float)g_cmdData.wpc_vol / 31.f, 1.0f));
 							ALT_INFO(0, "Change volume %.02f (%u)", g_pProcessor->getGlobalVol(), g_cmdData.wpc_vol);
 						}
 						else
