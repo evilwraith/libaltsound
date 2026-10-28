@@ -59,6 +59,9 @@ public:
 	// Return parsed skip count value
 	unsigned int getSkipCount() const;
 
+	// Return the package gain, linear (from package_gain_db)
+	float getPackageGain() const;
+
 private: // functions
 
 	// helper function to parse behavior variable values
@@ -93,6 +96,7 @@ private: // data
 	bool rom_volume_control = true;
 	string altsound_format;
 	unsigned int skip_count = 0;
+	float package_gain = 1.0f;
 };
 
 // ----------------------------------------------------------------------------
@@ -120,6 +124,12 @@ inline bool AltsoundIniProcessor::usingRomVolumeControl() const {
 
 inline unsigned int AltsoundIniProcessor::getSkipCount() const {
 	return skip_count;
+}
+
+// ----------------------------------------------------------------------------
+
+inline float AltsoundIniProcessor::getPackageGain() const {
+	return package_gain;
 }
 
 #endif // ALTSOUND_INI_PROCESSOR_H

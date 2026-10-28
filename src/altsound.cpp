@@ -10,6 +10,7 @@
 #include "miniaudio_bass_compat.hpp"
 #include "miniaudio_private.h"
 
+#include <cmath>
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -49,6 +50,18 @@ static uint32_t g_bufferSizeFrames = 256;
 static float g_masterGain = 1.0f;
 static std::mutex g_engineGainMutex;
 
+// The package's own level (altsound.ini package_gain_db), multiplied with the host gain on the
+// engine's output. Set at init, guarded like g_masterGain.
+static float g_packageGain = 1.0f;
+
+// Peak limiter on the finished mix. With gains above 1.0 overlapping samples can sum past full
+// scale, which the host would clip. Instant attack, so no output sample exceeds the threshold;
+// exponential release. Below the threshold it is a no-op. Only touched on the mixing thread
+// (reset in AltSoundInit before the engine starts).
+static constexpr float kLimiterThreshold = 0.97f; // -0.26 dBFS
+static constexpr float kLimiterReleaseSec = 0.15f;
+static float g_limiterGain = 1.0f;
+
 // Sample groups of the loaded package, see AltSoundGetSampleGroups. Guarded by io_mutex.
 static unsigned int g_sampleGroups = 0;
 
@@ -74,6 +87,19 @@ static void AltsoundEngineProcess(void* pUserData, float* pFramesOut, ma_uint64 
 
     for (const auto& e : ended)
         e.callback(e.hsync, e.hstream, 0, e.userdata);
+
+    const float release = 1.0f - expf(-1.0f / (kLimiterReleaseSec * (float)g_sampleRate));
+    for (ma_uint64 f = 0; f < frameCount; ++f) {
+        float* const frame = pFramesOut + f * g_channels;
+        float peak = 0.0f;
+        for (uint32_t c = 0; c < g_channels; ++c)
+            peak = std::max(peak, fabsf(frame[c]));
+        const float target = (peak > kLimiterThreshold) ? kLimiterThreshold / peak : 1.0f;
+        g_limiterGain = (target < g_limiterGain) ? target : g_limiterGain + (target - g_limiterGain) * release;
+        if (g_limiterGain < 1.0f)
+            for (uint32_t c = 0; c < g_channels; ++c)
+                frame[c] *= g_limiterGain;
+    }
 
     std::lock_guard<std::mutex> lock(g_audioMutex);
     if (g_audioCallback)
@@ -510,8 +536,10 @@ ALTSOUNDAPI bool AltSoundInit(const string& pinmamePath, const string& gameName,
 
 	{
 		std::lock_guard<std::mutex> lock(g_engineGainMutex);
-		altsound_ma_engine_set_volume(g_engine, g_masterGain);
+		g_packageGain = ini_proc.getPackageGain();
+		altsound_ma_engine_set_volume(g_engine, g_masterGain * g_packageGain);
 	}
+	g_limiterGain = 1.0f;
 
 	altsound_ma_engine_start(g_engine);
 
@@ -704,7 +732,7 @@ ALTSOUNDAPI void AltSoundSetMasterGain(float gain)
 	std::lock_guard<std::mutex> lock(g_engineGainMutex);
 	g_masterGain = gain;
 	if (g_engine)
-		altsound_ma_engine_set_volume(g_engine, gain);
+		altsound_ma_engine_set_volume(g_engine, gain * g_packageGain);
 }
 
 ALTSOUNDAPI float AltSoundGetMasterGain()

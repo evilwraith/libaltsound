@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 #include "altsound_ini_processor.hpp"
+#include <cmath>
 #include "altsound_logger.hpp"
 
 // ----------------------------------------------------------------------------
@@ -97,6 +98,21 @@ bool AltsoundIniProcessor::parse_altsound_ini(const std::filesystem::path& path_
 	catch (const std::out_of_range& e) {
 		ALT_ERROR(0, "Number out of range while parsing cmd_skip_count value: %s\n", skip_count_str.c_str());
 		return false;
+	}
+
+	// get package gain: a level for the whole package, for packages mastered quieter than others
+	string package_gain_str;
+	inipp::get_value(ini.sections["system"], "package_gain_db", package_gain_str);
+	if (!package_gain_str.empty()) {
+		try {
+			const float db = clamp(std::stof(package_gain_str), -60.0f, 24.0f);
+			package_gain = powf(10.0f, db / 20.0f);
+			ALT_INFO(0, "Parsed \"package_gain_db\": %.1f (x%.2f)", db, package_gain);
+		}
+		catch (const std::exception&) {
+			ALT_ERROR(0, "Invalid package_gain_db value: %s", package_gain_str.c_str());
+			return false;
+		}
 	}
 
 	// get AltSound format type
@@ -590,12 +606,17 @@ bool AltsoundIniProcessor::create_altsound_ini(const std::filesystem::path& path
 		";                     specify how many initial commands to ignore at startup.\n"
 		";                     NOTE:  If the record_sound_cmds flag is set, the skipped\n"
 		";                     commands will be included in the recording file.\n"
+		";\n"
+		"; package_gain_db   : level of the whole package in dB, applied on top of every\n"
+		";                     sample's own gain (-60 to 24). For packages mastered quieter\n"
+		";                     than others. A limiter keeps the mix under full scale.\n"
 		"; ----------------------------------------------------------------------------\n"
 		"\n"
 		"[system]\n"
 		"record_sound_cmds = 0\n"
 		"rom_volume_ctrl = 1\n"
 		"cmd_skip_count = 0\n"
+		"package_gain_db = 0\n"
 		"\n"
 		"; ----------------------------------------------------------------------------\n"
 		"; There are three supported AltSound formats:\n"
