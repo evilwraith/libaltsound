@@ -83,6 +83,8 @@ struct _stream_info {
 	unsigned int hsync = 0;
 	enum AltsoundSampleType stream_type = static_cast<AltsoundSampleType>(0);
 	unsigned int channel_idx = 0;
+	// sound command the stream was started for
+	unsigned int cmd = ~0u;
 	std::string sample_path;
 	unsigned int ducking_profile = 0;
 	float ducking = 1.0f;

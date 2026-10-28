@@ -25,6 +25,7 @@
 #include "miniaudio_private.h"
 
 #include <mutex>
+#include <vector>
 
 using std::string;
 
@@ -84,6 +85,9 @@ public:
 	// whether the pack has a sample for this command
 	bool hasSample(const unsigned int cmd_combined_in) { return getSample(cmd_combined_in) != ~0u; }
 
+	// Data East sound board music handling (DE, DEDMD16/32/64), see filterDataEastMusic
+	void setDataEastMusic(const bool enable);
+
 public: // data
 
 protected: // functions
@@ -93,6 +97,21 @@ protected: // functions
 
 	// find sample matching provided command
 	virtual unsigned int getSample(const unsigned int cmd_combined_in) = 0;
+
+	// whether the pack's sample for this command is music
+	virtual bool isMusicSample(const unsigned int cmd_combined_in) = 0;
+
+	// whether a music stream started for this command is playing. Caller holds io_mutex.
+	static bool isMusicPlaying(const unsigned int cmd_combined_in);
+
+	// Data East music, applied by the processors after the skip count and before the sample
+	// lookup (caller holds io_mutex). The DE sound board keeps the music itself: a mode's music
+	// plays over the main theme and the CPU ends the mode with the next (odd) command, after
+	// which the board resumes the theme on its own -- the CPU may send no music for a long
+	// time (Tales from the Crypt: 42 s after 0x1f). The CPU also re-sends the music that is
+	// playing. Returns false if nothing is to be played; may replace cmd_inout with the music
+	// to resume.
+	bool filterDataEastMusic(unsigned int& cmd_inout);
 
 	// Create stream for miniaudio playback
 	bool createStream(void* syncproc_in, AltsoundStreamInfo* stream_out);
@@ -143,6 +162,9 @@ private: // data
 
 	bool rec_snd_cmds = false;
 	bool use_rom_ctrl = true;
+	bool de_music = false;
+	std::vector<unsigned int> de_modes; // mode music, most recent last
+	unsigned int de_main = ~0u;         // main theme to return to
 	static float global_vol;
 	static float master_vol;
 	static std::array<float, OVERLAY + 1> group_gain;

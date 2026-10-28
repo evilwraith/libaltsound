@@ -224,12 +224,19 @@ bool GSoundProcessor::handleCmd(const unsigned int cmd_combined_in)
 		return true;
 	}
 
+	unsigned int cmd = cmd_combined_in;
+	if (!filterDataEastMusic(cmd)) {
+		ALT_OUTDENT;
+		ALT_DEBUG(0, "END GSoundProcessor::handleCmd()");
+		return true;
+	}
+
 	// get sample for playback
-	const int sample_idx = ALT_CALL(getSample(cmd_combined_in));
+	const int sample_idx = ALT_CALL(getSample(cmd));
 
 	if (sample_idx == -1) {
 		// No matching command.  Clean up and exit
-		ALT_ERROR(1, "FAILED GSoundProcessor::get_sample()", cmd_combined_in);
+		ALT_ERROR(1, "FAILED GSoundProcessor::get_sample()", cmd);
 
 		ALT_OUTDENT;
 		ALT_DEBUG(0, "END GSoundProcessor::handleCmd()");
@@ -239,6 +246,7 @@ bool GSoundProcessor::handleCmd(const unsigned int cmd_combined_in)
 	AltsoundStreamInfo* new_stream = new AltsoundStreamInfo();
 
 	// pre-populate stream info
+	new_stream->cmd = cmd;
 	new_stream->sample_path = samples[sample_idx].fname;
 	new_stream->gain = samples[sample_idx].gain;
 	new_stream->loop = samples[sample_idx].loop;
@@ -331,7 +339,7 @@ bool GSoundProcessor::handleCmd(const unsigned int cmd_combined_in)
 	if (new_stream->hstream != MINIAUDIO_NO_STREAM) {
 		ALT_INFO(1, "Playing %s stream: %s", stream_type_str, sample_short_path);
 		ALT_DEBUG(1, "HSTREAM(%u)  CH(%02d)  CMD(%04X)  SAMPLE(%s)", new_stream->hstream,
-			      new_stream->channel_idx, cmd_combined_in, sample_short_path);
+			      new_stream->channel_idx, cmd, sample_short_path);
 
 		if (!MiniAudio_ChannelPlay(new_stream->hstream, false)) {
 			// Sound playback failed
@@ -409,6 +417,16 @@ bool GSoundProcessor::loadSamples()
 	ALT_OUTDENT;
 	ALT_DEBUG(0, "END GSoundProcessor::init()");
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+
+bool GSoundProcessor::isMusicSample(const unsigned int cmd_combined_in)
+{
+	for (const GSoundSampleInfo& sample : samples)
+		if (sample.id == cmd_combined_in)
+			return sample.type == "music";
+	return false;
 }
 
 // ---------------------------------------------------------------------------

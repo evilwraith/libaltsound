@@ -69,6 +69,9 @@ private: // functions
 	// find sample matching provided command
 	unsigned int getSample(const unsigned int cmd_combined_in) override;
 
+	// whether the pack's sample for this command is music
+	bool isMusicSample(const unsigned int cmd_combined_in) override;
+
 	// process stream commands
 	bool processStream(const BehaviorInfo& behavior, AltsoundStreamInfo* stream_out);
 

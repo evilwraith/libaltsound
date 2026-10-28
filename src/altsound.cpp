@@ -560,6 +560,10 @@ ALTSOUNDAPI void AltSoundSetHardwareGen(ALTSOUND_HARDWARE_GEN hardwareGen)
 
 	ALT_DEBUG(0, "MAME_GEN: 0x%013x", (uint64_t)g_hardwareGen);
 
+	if (g_pProcessor)
+		g_pProcessor->setDataEastMusic(hardwareGen == ALTSOUND_HARDWARE_GEN_DE || hardwareGen == ALTSOUND_HARDWARE_GEN_DEDMD16
+			|| hardwareGen == ALTSOUND_HARDWARE_GEN_DEDMD32 || hardwareGen == ALTSOUND_HARDWARE_GEN_DEDMD64);
+
 	ALT_OUTDENT;
 	ALT_DEBUG(0, "END AltSoundSetHardwareGen()");
 }

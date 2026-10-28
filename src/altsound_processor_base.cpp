@@ -16,9 +16,11 @@
 #include <chrono>
 #include <cfloat>
 #include <fstream>
+#include <algorithm>
 
 extern AltsoundLogger alog;
 extern StreamArray channel_stream;
+extern std::mutex io_mutex;
 
 // initialize static data members
 float AltsoundProcessorBase::global_vol = 1.0f;
@@ -89,6 +91,76 @@ bool AltsoundProcessorBase::handleCmd(const unsigned int cmd_in)
 		lastCmdTime = currentTime;
 	}
 #endif
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+
+void AltsoundProcessorBase::setDataEastMusic(const bool enable)
+{
+	std::lock_guard<std::mutex> guard(io_mutex);
+	de_music = enable;
+	de_modes.clear();
+	de_main = ~0u;
+}
+
+// ---------------------------------------------------------------------------
+
+bool AltsoundProcessorBase::isMusicPlaying(const unsigned int cmd_combined_in)
+{
+	for (const AltsoundStreamInfo* stream : channel_stream)
+		if (stream && stream->stream_type == MUSIC && stream->cmd == cmd_combined_in)
+			return true;
+	return false;
+}
+
+// ---------------------------------------------------------------------------
+
+bool AltsoundProcessorBase::filterDataEastMusic(unsigned int& cmd_inout)
+{
+	if (!de_music)
+		return true;
+
+	const unsigned int cmd = cmd_inout;
+
+	// Music: 0x01-0x11 and 0x40 and up are main themes, 0x12-0x3F mode (mission) music
+	if (isMusicSample(cmd)) {
+		if (isMusicPlaying(cmd)) {
+			ALT_INFO(0, "DE music %04X already playing", cmd);
+			return false;
+		}
+		const bool main_theme = (cmd >= 0x01 && cmd <= 0x11) || cmd >= 0x40;
+		if (!main_theme) {
+			de_modes.erase(std::remove(de_modes.begin(), de_modes.end(), cmd), de_modes.end());
+			de_modes.push_back(cmd);
+			return true;
+		}
+		de_main = cmd;
+		if (!de_modes.empty()) {
+			ALT_INFO(0, "DE main theme %04X kept for after mode music %04X", cmd, de_modes.back());
+			return false;
+		}
+		return true;
+	}
+
+	if (hasSample(cmd))
+		return true;
+
+	// The command after a mode's music ends that mode: resume the previous mode or the theme
+	if ((cmd & 1) && std::find(de_modes.begin(), de_modes.end(), cmd - 1) != de_modes.end()) {
+		de_modes.erase(std::remove(de_modes.begin(), de_modes.end(), cmd - 1), de_modes.end());
+		const unsigned int resume = de_modes.empty() ? de_main : de_modes.back();
+		if (resume == ~0u || isMusicPlaying(resume))
+			return true;
+		ALT_INFO(0, "DE mode %04X ended, resuming music %04X", cmd - 1, resume);
+		cmd_inout = resume;
+		return true;
+	}
+
+	// 0x18 and 0x23 stop the music (altsound_postprocess_commands), 0x00 stops everything
+	if (cmd == 0x0018 || cmd == 0x0023 || cmd == 0x0000)
+		de_modes.clear();
+
 	return true;
 }
 

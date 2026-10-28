@@ -104,12 +104,19 @@ bool AltsoundProcessor::handleCmd(const unsigned int cmd_combined_in)
 		return true;
 	}
 
+	unsigned int cmd = cmd_combined_in;
+	if (!filterDataEastMusic(cmd)) {
+		ALT_OUTDENT;
+		ALT_DEBUG(0, "END AltsoundProcessor::handleCmd()");
+		return true;
+	}
+
 	// get sample for playback
-	const unsigned int sample_idx = getSample(cmd_combined_in);
+	const unsigned int sample_idx = getSample(cmd);
 
 	if (sample_idx == UNSET_IDX) {
 		// No matching command.  Clean up and exit
-		ALT_ERROR(0, "FAILED AltsoundProcessor::get_sample(%u)", cmd_combined_in);
+		ALT_ERROR(0, "FAILED AltsoundProcessor::get_sample(%u)", cmd);
 
 		ALT_OUTDENT;
 		ALT_DEBUG(0, "END AltsoundProcessor::handleCmd()");
@@ -124,6 +131,7 @@ bool AltsoundProcessor::handleCmd(const unsigned int cmd_combined_in)
 	unsigned int stream = MINIAUDIO_NO_STREAM;
 
 	// pre-populate stream info
+	new_stream->cmd         = cmd;
 	new_stream->sample_path = samples[sample_idx].fname;
 	new_stream->stop_music  = samples[sample_idx].stop;
 	new_stream->ducking     = samples[sample_idx].ducking;
@@ -223,7 +231,7 @@ bool AltsoundProcessor::handleCmd(const unsigned int cmd_combined_in)
 		}
 		else {
 			ALT_INFO(0, "SUCCESS MiniAudio_ChannelPlay(%u): CH(%d) CMD(%04X) SAMPLE(%s)", \
-			 new_stream->hstream, new_stream->channel_idx, cmd_combined_in, \
+			 new_stream->hstream, new_stream->channel_idx, cmd, \
 			 getShortPath(new_stream->sample_path).c_str());
 		}
 	}
@@ -323,6 +331,16 @@ bool AltsoundProcessor::loadSamples()
 	ALT_OUTDENT;
 	ALT_DEBUG(0, "END AltsoundProcessor::loadSamples");
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+
+bool AltsoundProcessor::isMusicSample(const unsigned int cmd_combined_in)
+{
+	for (const AltsoundSampleInfo& sample : samples)
+		if (sample.id == cmd_combined_in)
+			return sample.channel == 0;
+	return false;
 }
 
 // ---------------------------------------------------------------------------
