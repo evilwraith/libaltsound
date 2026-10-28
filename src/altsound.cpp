@@ -290,7 +290,17 @@ void altsound_preprocess_commands(int cmd)
 			break;
 		}
 
-		default: break;
+		case ALTSOUND_HARDWARE_GEN_BY17: // PinMAME logs one byte per sound command
+		case ALTSOUND_HARDWARE_GEN_BY35:
+		default: { // and so on every generation without a case above
+			ALT_DEBUG(0, "Hardware Generation: BY17, BY35 or other (one byte per command)");
+
+			g_cmdData.stored_command = 0;
+			g_cmdData.cmd_counter = 0;
+			g_cmdData.cmd_filter = 0;
+
+			break;
+		}
 	}
 
 	ALT_OUTDENT;
@@ -393,20 +403,14 @@ ALTSOUNDAPI bool AltSoundInit(const string& pinmamePath, const string& gameName,
 	// initialize channel_stream storage
 	std::fill(channel_stream.begin(), channel_stream.end(), nullptr);
 
-	string szPinmamePath = pinmamePath;
-
-	std::replace(szPinmamePath.begin(), szPinmamePath.end(), '\\', '/');
-
-	if (szPinmamePath.back() != '/')
-		szPinmamePath += '/';
-
-	const string szAltSoundPath = szPinmamePath + "altsound/" + gameName + '/';
+	const std::filesystem::path pinmame_path(pinmamePath);
+	const std::filesystem::path altsound_path = pinmame_path / "altsound" / gameName;
 
 	// parse .ini file
 	AltsoundIniProcessor ini_proc;
-	if (!ini_proc.parse_altsound_ini(szAltSoundPath)) {
+	if (!ini_proc.parse_altsound_ini(altsound_path)) {
 		// Error message and return
-		ALT_ERROR(0, "Failed to parse_altsound_ini(%s)", szAltSoundPath.c_str());
+		ALT_ERROR(0, "Failed to parse_altsound_ini(%s)", altsound_path.string().c_str());
 		ALT_OUTDENT;
 		ALT_DEBUG(0, "END AltSoundInit()");
 		return false;
@@ -417,10 +421,10 @@ ALTSOUNDAPI bool AltSoundInit(const string& pinmamePath, const string& gameName,
 	if (format == "g-sound") {
 		// G-Sound only supports new CSV format. No need to specify format
 		// in the constructor
-		g_pProcessor = new GSoundProcessor(gameName, szPinmamePath);
+		g_pProcessor = new GSoundProcessor(gameName, pinmame_path);
 	}
 	else if (format == "altsound" || format == "legacy") {
-		g_pProcessor = new AltsoundProcessor(gameName, szPinmamePath, format);
+		g_pProcessor = new AltsoundProcessor(gameName, pinmame_path, format);
 	}
 	else {
 		ALT_ERROR(0, "Unknown AltSound format: %s", format.c_str());
@@ -498,6 +502,8 @@ ALTSOUNDAPI void AltSoundSetAudioCallback(AltSoundAudioCallback callback, void* 
  * AltSoundProcessCommand
  ******************************************************/
 
+static unsigned int g_cmdBoard = 0; // sound board of the command being processed
+
 ALTSOUNDAPI bool AltSoundProcessCommand(const unsigned int cmd, int attenuation)
 {
 	ALT_DEBUG(0, "BEGIN AltSoundProcessCommand()");
@@ -548,7 +554,13 @@ ALTSOUNDAPI bool AltSoundProcessCommand(const unsigned int cmd, int attenuation)
 	ALT_DEBUG(0, "Command complete. Processing...");
 
 	// combine stored command with the current
-	const unsigned int cmd_combined = (g_cmdData.stored_command << 8) | cmd;
+	unsigned int cmd_combined = (g_cmdData.stored_command << 8) | cmd;
+
+	// System 11 machines with two sound boards: both take bytes 01..FF, so the commands of
+	// board 1 (the separate sound board) are 0x01xx when the pack has a sample for them
+	if (g_cmdBoard == 1 && (g_hardwareGen == ALTSOUND_HARDWARE_GEN_S11X || g_hardwareGen == ALTSOUND_HARDWARE_GEN_S11B2)
+		&& g_pProcessor->hasSample(0x0100 | cmd_combined))
+		cmd_combined |= 0x0100;
 
 	// Handle the resulting command
 	if (!ALT_CALL(g_pProcessor->handleCmd(cmd_combined))) {
@@ -569,6 +581,18 @@ ALTSOUNDAPI bool AltSoundProcessCommand(const unsigned int cmd, int attenuation)
 	ALT_DEBUG(0, "");
 
 	return true;
+}
+
+/******************************************************
+ * AltSoundProcessBoardCommand
+ ******************************************************/
+
+ALTSOUNDAPI bool AltSoundProcessBoardCommand(const unsigned int board, const unsigned int cmd, int attenuation)
+{
+	g_cmdBoard = board;
+	const bool result = AltSoundProcessCommand(cmd, attenuation);
+	g_cmdBoard = 0;
+	return result;
 }
 
 /******************************************************
