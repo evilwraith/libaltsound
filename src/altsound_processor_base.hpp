@@ -26,6 +26,7 @@
 
 #include <mutex>
 #include <vector>
+#include <unordered_map>
 
 using std::string;
 
@@ -134,7 +135,8 @@ protected: // functions
 	// set volume on provided stream
 	static bool setStreamVolume(unsigned int hstream, const float vol_in);
 
-	// get volume on provided stream, -FLT_MAX on error
+	// get volume on provided stream (as last set with setStreamVolume, before the global and master
+	// volume), -FLT_MAX on error
 	static float getStreamVolume(unsigned int hstream);
 
 	// stream registered on hstream in channel_stream, nullptr if none (yet)
@@ -158,6 +160,10 @@ protected: // data
 
 private: // functions
 
+	// set the volume of all playing streams again, after a change of the global or master volume
+	// (io_mutex must be held)
+	static void reapplyStreamVolumes();
+
 private: // data
 
 	bool rec_snd_cmds = false;
@@ -168,6 +174,7 @@ private: // data
 	static float global_vol;
 	static float master_vol;
 	static std::array<float, OVERLAY + 1> group_gain;
+	static std::unordered_map<unsigned int, float> stream_vol; // per stream volume, before the global and master volume
 	unsigned int skip_count;
 };
 
@@ -207,12 +214,6 @@ inline bool AltsoundProcessorBase::romControlsVol() {
 
 inline void AltsoundProcessorBase::recordSoundCmds(const bool rec_sound_cmds) {
 	rec_snd_cmds = rec_sound_cmds;
-}
-
-// ----------------------------------------------------------------------------
-
-inline void AltsoundProcessorBase::setMasterVol(const float vol_in) {
-	master_vol = vol_in;
 }
 
 // ----------------------------------------------------------------------------

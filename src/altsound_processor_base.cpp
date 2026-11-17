@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 
 #include "altsound_processor_base.hpp"
+#include "altsound.h"
 #include "altsound_logger.hpp"
 #include "miniaudio_bass_compat.hpp"
 
@@ -17,15 +18,18 @@
 #include <cfloat>
 #include <fstream>
 #include <algorithm>
+#include <mutex>
 
 extern AltsoundLogger alog;
 extern StreamArray channel_stream;
 extern std::mutex io_mutex;
+extern ALTSOUND_HARDWARE_GEN g_hardwareGen;
 
 // initialize static data members
 float AltsoundProcessorBase::global_vol = 1.0f;
 float AltsoundProcessorBase::master_vol = 1.0f;
 std::array<float, OVERLAY + 1> AltsoundProcessorBase::group_gain = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+std::unordered_map<unsigned int, float> AltsoundProcessorBase::stream_vol;
 
 // reference to sound command recording status
 extern bool rec_snd_cmds;
@@ -39,6 +43,7 @@ extern bool rec_snd_cmds;
 #ifndef ALTSOUND_STANDALONE
 	std::ofstream logFile;
 	std::chrono::high_resolution_clock::time_point lastCmdTime;
+	bool genLogged = false; // the hardware_gen line is written with the first command, see handleCmd
 #endif
 
 // ---------------------------------------------------------------------------
@@ -81,6 +86,13 @@ bool AltsoundProcessorBase::handleCmd(const unsigned int cmd_in)
 
 		// Compute the difference from the last command time.
 		const auto deltaTime = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastCmdTime).count();
+
+		// The hardware generation is set after AltSoundInit (which starts the recording), so it
+		// goes in now, still before the first command, where the replay (test.cpp) expects it
+		if (!genLogged) {
+			logFile << "hardware_gen: 0x" << std::hex << static_cast<uint64_t>(g_hardwareGen) << std::endl;
+			genLogged = true;
+		}
 
 		// Log the time and command.
 		logFile << std::setw(10) << std::setfill('0') << std::dec << deltaTime;
@@ -194,16 +206,6 @@ bool AltsoundProcessorBase::startLogging(const std::string& gameName) {
 		return false;
 	}
 
-	const std::filesystem::path recording_fname = vpm_path / "altsound" / "cmdlog.txt";
-	logFile.open(recording_fname);
-	if (!logFile.is_open()) {
-		ALT_ERROR(1, "Failed to open log file: %s", recording_fname.string().c_str());
-		ALT_DEBUG(0, "END startLogging()");
-		return false;
-	}
-
-	ALT_INFO(1, "Creating sound command log: %s", recording_fname.string().c_str());
-
 	const std::filesystem::path game_altsound_path = vpm_path / "altsound" / gameName;
 
 	// Check if game_altsound_path is valid
@@ -213,8 +215,19 @@ bool AltsoundProcessorBase::startLogging(const std::string& gameName) {
 		return false;
 	}
 
+	// in the game's altsound folder, as PinMAME does
+	const std::filesystem::path recording_fname = game_altsound_path / "cmdlog.txt";
+	logFile.open(recording_fname);
+	if (!logFile.is_open()) {
+		ALT_ERROR(1, "Failed to open log file: %s", recording_fname.string().c_str());
+		ALT_DEBUG(0, "END startLogging()");
+		return false;
+	}
+
+	ALT_INFO(1, "Creating sound command log: %s", recording_fname.string().c_str());
+
 	logFile << "altsound_path: " << game_altsound_path.generic_string() << std::endl;
-	logFile << "hardware_gen: 0x" << 0 << std::endl;
+	genLogged = false;
 
 	lastCmdTime = std::chrono::high_resolution_clock::now();
 
@@ -257,8 +270,7 @@ bool AltsoundProcessorBase::setStreamVolume(unsigned int stream_in, const float 
 		return true;
 
 	AltsoundStreamInfo* const stream = findStream(stream_in);
-	if (stream)
-		stream->processor_vol = vol_in;
+	stream_vol[stream_in] = vol_in; // see reapplyStreamVolumes and setGroupGain
 	const float group_vol = stream ? getGroupGain(stream->stream_type) : 1.0f;
 	const float new_vol = vol_in * global_vol * master_vol * group_vol;
 	ALT_INFO(1, "Setting volume for stream %u", stream_in);
@@ -285,13 +297,10 @@ float AltsoundProcessorBase::getStreamVolume(unsigned int stream_in)
 	if (stream_in == MINIAUDIO_NO_STREAM)
 		return -FLT_MAX;
 
-	float vol;
-	if (!MiniAudio_ChannelGetVolume(stream_in, vol))
-		return -FLT_MAX;
-	else {
-		const AltsoundStreamInfo* const stream = findStream(stream_in);
-		return vol/(global_vol * master_vol * (stream ? getGroupGain(stream->stream_type) : 1.0f));
-	}
+	// the volume as set, not read back from the stream and divided by the global and master volume,
+	// which can be 0
+	const auto it = stream_vol.find(stream_in);
+	return (it != stream_vol.end()) ? it->second : -FLT_MAX;
 }
 
 // ----------------------------------------------------------------------------
@@ -307,6 +316,19 @@ AltsoundStreamInfo* AltsoundProcessorBase::findStream(unsigned int stream_in)
 
 // ----------------------------------------------------------------------------
 
+void AltsoundProcessorBase::reapplyStreamVolumes()
+{
+	for (const auto stream : channel_stream) {
+		if (stream) {
+			const float vol = getStreamVolume(stream->hstream);
+			if (vol != -FLT_MAX)
+				setStreamVolume(stream->hstream, vol);
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+
 void AltsoundProcessorBase::setGroupGain(AltsoundSampleType type, const float gain_in)
 {
 	if (type <= UNDEFINED || type > OVERLAY)
@@ -317,9 +339,25 @@ void AltsoundProcessorBase::setGroupGain(AltsoundSampleType type, const float ga
 	// Re-set each playing stream of the group from the volume the processor last gave it (its
 	// gain after ducking), which setStreamVolume recorded; the new factor goes on top of that.
 	for (const auto stream : channel_stream) {
-		if (stream && stream->stream_type == type)
-			setStreamVolume(stream->hstream, stream->processor_vol);
+		if (stream && stream->stream_type == type) {
+			const float vol = getStreamVolume(stream->hstream);
+			if (vol != -FLT_MAX)
+				setStreamVolume(stream->hstream, vol);
+		}
 	}
+}
+
+// ----------------------------------------------------------------------------
+
+void AltsoundProcessorBase::setMasterVol(const float vol_in)
+{
+	if (vol_in == master_vol)
+		return;
+
+	// the streams that play keep their volume relative to the new master volume
+	std::lock_guard<std::mutex> guard(io_mutex);
+	master_vol = vol_in;
+	reapplyStreamVolumes();
 }
 
 // ----------------------------------------------------------------------------
@@ -391,6 +429,7 @@ bool AltsoundProcessorBase::freeStream(const unsigned int hstream_in)
 	ALT_INDENT;
 
 	const bool success = MiniAudio_StreamFree(hstream_in);
+	stream_vol.erase(hstream_in);
 	if (!success) {
 		ALT_ERROR(1, "Failed to free stream(%u)", hstream_in);
 	} else {
