@@ -66,7 +66,9 @@ AltsoundProcessorBase::~AltsoundProcessorBase()
 		logFile.close();
 #endif
 
-	// clean up stored steam objects
+	// clean up stored steam objects, under io_mutex as a group gain change walks channel_stream (the
+	// derived destructors have released it by now)
+	std::lock_guard<std::mutex> guard(io_mutex);
 	for (auto& stream : channel_stream) {
 		delete stream;
 		stream = nullptr;

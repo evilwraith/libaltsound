@@ -823,12 +823,17 @@ ALTSOUNDAPI void AltSoundShutdown()
 	}
 
 	if (g_pProcessor) {
-		// The destructors free channel_stream without locking; hold io_mutex so a group gain
-		// change from another thread cannot walk it meanwhile.
-		std::lock_guard<std::mutex> lock(io_mutex);
-		delete g_pProcessor;
-		g_pProcessor = NULL;
-		g_sampleGroups = 0;
+		// The destructors stop their streams under io_mutex themselves (as PinMAME's AltSound), so a
+		// group gain change from another thread cannot walk channel_stream meanwhile. Holding it here
+		// around the delete as well deadlocked every shutdown: std::mutex is not recursive.
+		AltsoundProcessorBase* processor;
+		{
+			std::lock_guard<std::mutex> lock(io_mutex);
+			processor = g_pProcessor;
+			g_pProcessor = NULL;
+			g_sampleGroups = 0;
+		}
+		delete processor;
 	}
 
 	if (g_engine) {
